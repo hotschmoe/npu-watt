@@ -1,0 +1,13 @@
+[package]
+name = "npu-watt"
+version = "0.1.0"
+edition = "2024"
+description = "Per-rail power and energy-per-token measurement for NPU LLM inference on Snapdragon X (Windows Energy Meter)"
+license = "MIT"
+repository = "https://github.com/hotschmoe/npu-watt"
+keywords = ["npu", "power", "snapdragon", "llm", "hexagon"]
+
+[dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_System_Performance", "Win32_System_JobObjects", "Win32_System_Power", "Win32_System_Threading", "Win32_Security"] }
