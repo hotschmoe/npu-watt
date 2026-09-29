@@ -31,7 +31,12 @@ npu-watt monitor [--interval-ms N]
 npu-watt run [--label L] [--json F] [--csv F] [--tokens N] [--tok-s X] [--idle-secs S] -- <cmd> [args]
 npu-watt record [--label L] [--idle-secs S] [--pid P]...        # for scripts, see below
 npu-watt compare A.json B.json [--json OUT.json]
+npu-watt show REPORT.json...                                    # re-render saved reports
 ```
+
+`run` and `record` take `--require npu-only` and exit with code 2 if the verdict differs, so a test can
+fail loudly if a change makes the GPU or CPU pick up work. In Python, `measure(..., require="npu-only")`
+raises `NpuVerdictError` (its `.report` still holds the numbers).
 
 `run` measures an idle baseline, runs your command in a job object (so CPU time of the whole process
 tree counts), and reports over the **NPU-active window** (intervals where npu draw is clearly above
@@ -60,7 +65,8 @@ print(npu_watt.compare(base, m.report)["summary"])
 # tile16 vs baseline: decode -8.0% (25.00 -> 23.00 tok/s), NPU power -36.0% (4.00 -> 2.56 W), NPU J/token -30.4%, ...
 ```
 
-`examples/ab_decode.py --a "<cmd>" --b "<cmd>" [--order ABBA]` A/Bs two llama.cpp commands.
+`npu_watt.average(reports)` averages repeated runs (the A runs of an ABBA sequence) so `compare` works on
+means. `examples/ab_decode.py --a "<cmd>" --b "<cmd>" [--order ABBA]` A/Bs two llama.cpp commands.
 
 Rust: the crate is also a library (`Meter`, `Recorder`, `analyze`, `compare`, `Report`); see the docs in
 `src/lib.rs`. `record` speaks a tiny protocol if you want another language: it prints `READY` after

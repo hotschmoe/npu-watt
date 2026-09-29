@@ -35,9 +35,9 @@ def main():
     reports = {"A": [], "B": []}
     for arm in args.order:
         reports[arm].append(run_arm(f"{arm}{len(reports[arm]) + 1}", cmds[arm]))
-    # compare first A against last B; with ABBA the middle runs show run-to-run spread
-    c = npu_watt.compare(reports["A"][0], reports["B"][-1])
-    print(c["summary"])
+    a = npu_watt.average(reports["A"], "A")
+    b = npu_watt.average(reports["B"], "B")
+    print(npu_watt.compare(a, b)["summary"])
     if args.order == "ABBA":
         print("A repeat:", npu_watt.compare(reports["A"][0], reports["A"][1])["summary"])
         print("B repeat:", npu_watt.compare(reports["B"][0], reports["B"][1])["summary"])

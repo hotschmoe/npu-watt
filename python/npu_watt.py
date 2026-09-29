@@ -20,7 +20,15 @@ import shutil
 import subprocess
 import tempfile
 
-__all__ = ["measure", "compare", "find_exe", "Measurement"]
+__all__ = ["measure", "compare", "average", "find_exe", "Measurement", "NpuVerdictError"]
+
+
+class NpuVerdictError(RuntimeError):
+    """The run did not get the verdict passed as `require=`; `.report` still holds the numbers."""
+
+    def __init__(self, msg, report):
+        super().__init__(msg)
+        self.report = report
 
 
 def find_exe():
@@ -38,11 +46,13 @@ def find_exe():
 class Measurement:
     """Context manager. The idle baseline is measured on entry (idle_secs) before the body runs."""
 
-    def __init__(self, label="run", pids=None, idle_secs=2.0, interval_ms=250, exe=None):
+    def __init__(self, label="run", pids=None, idle_secs=2.0, interval_ms=250, require=None, exe=None):
         self.label, self.tokens, self.tok_s = label, None, None
         self.report = None
         self._eval_lines = []
         args = [exe or find_exe(), "record", "--label", label, "--idle-secs", str(idle_secs), "--interval-ms", str(interval_ms)]
+        if require:
+            args += ["--require", require]
         for p in pids or []:
             args += ["--pid", str(p)]
         self._args = args
@@ -74,10 +84,12 @@ class Measurement:
         except subprocess.TimeoutExpired:
             p.kill()
             raise
-        if p.returncode != 0:
+        self.text = err
+        if p.returncode not in (0, 2):
             raise RuntimeError(f"npu-watt failed: {err.strip()}")
         self.report = json.loads(out.strip().splitlines()[-1])
-        self.text = err
+        if p.returncode == 2 and exc_type is None:
+            raise NpuVerdictError(err.strip().splitlines()[-1], self.report)
         return False
 
 
@@ -95,3 +107,17 @@ def compare(a, b, exe=None):
         subprocess.run([exe or find_exe(), "compare", pa, pb, "--json", pc], check=True, capture_output=True, text=True)
         with open(pc) as f:
             return json.load(f)
+
+
+def average(reports, label=None):
+    """Mean of several reports (e.g. the A runs of an ABBA sequence), usable with compare()."""
+    def mean(vals):
+        if all(isinstance(v, dict) for v in vals):
+            keys = set().union(*vals)
+            return {k: mean([v[k] for v in vals if k in v]) for k in keys}
+        if all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in vals):
+            return sum(vals) / len(vals)
+        return vals[0]
+    out = mean(reports)
+    out["label"] = label or "+".join(r["label"] for r in reports)
+    return out

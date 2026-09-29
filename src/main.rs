@@ -21,6 +21,11 @@ const USAGE: &str = "npu-watt: per-rail power for NPU-pinned inference (Windows 
       Stdin lines before stop: tokens=N, tok_s=X, label=L, eval=<llama.cpp eval line>.
       Prints the JSON report as the last stdout line (text report on stderr).
 
+  npu-watt show REPORT.json...
+      re-render saved reports as text
+
+  Both run and record accept --require npu-only (exit code 2 if the verdict differs).
+
   npu-watt compare A.json B.json [--json OUT.json]
       B vs A: change in decode speed, power, J/token, tok/s/W";
 
@@ -33,12 +38,13 @@ struct Args {
     idle_secs: f64,
     interval: Duration,
     pids: Vec<u32>,
+    require: Option<String>,
     cmd: Vec<String>,
     files: Vec<String>,
 }
 
 fn parse(a: &[String]) -> Result<Args, String> {
-    let mut o = Args { label: "run".into(), json: None, csv: None, tokens: None, tok_s: None, idle_secs: 2.0, interval: Duration::from_millis(250), pids: vec![], cmd: vec![], files: vec![] };
+    let mut o = Args { label: "run".into(), json: None, csv: None, tokens: None, tok_s: None, idle_secs: 2.0, interval: Duration::from_millis(250), pids: vec![], require: None, cmd: vec![], files: vec![] };
     let mut i = 0;
     while i < a.len() {
         let val = |i: usize| a.get(i + 1).cloned().ok_or(format!("{} needs a value", a[i]));
@@ -55,6 +61,7 @@ fn parse(a: &[String]) -> Result<Args, String> {
             "--tok-s" => o.tok_s = Some(num(i)?),
             "--idle-secs" => o.idle_secs = num(i)?,
             "--interval-ms" => o.interval = Duration::from_millis(num(i)? as u64),
+            "--require" => o.require = Some(val(i)?),
             "--pid" => o.pids.push(val(i)?.parse().map_err(|_| "bad --pid")?),
             x if !x.starts_with("--") => {
                 o.files.push(x.to_string());
@@ -92,6 +99,16 @@ fn write_csv(path: &str, samples: &[Sample]) -> Result<(), String> {
         writeln!(f, "{:.3},{:.3},{},{}", s.t, s.cpu_s, s.batt_w.map(|x| format!("{x:.3}")).unwrap_or_default(), v.join(",")).ok();
     }
     Ok(())
+}
+
+/// Exit code 2 when `--require` names a verdict the run did not get.
+fn enforce(o: &Args, r: &Report) {
+    if let Some(want) = &o.require {
+        if &r.verdict != want {
+            eprintln!("npu-watt: required verdict {want}, got {} ({})", r.verdict, r.verdict_notes.join("; "));
+            std::process::exit(2);
+        }
+    }
 }
 
 fn finish(o: &Args, samples: &[Sample], idle: &Rails, tokens: Option<f64>, tok_s: Option<f64>) -> Result<Report, String> {
@@ -151,6 +168,7 @@ fn run(o: Args) -> Result<(), String> {
     if tok_s.is_none() {
         println!("(no token rate found; pass --tokens N --tok-s X to get J/token and tok/s/W)");
     }
+    enforce(&o, &r);
     Ok(())
 }
 
@@ -184,6 +202,15 @@ fn record(mut o: Args) -> Result<(), String> {
     let r = finish(&o, &samples, &idle, tokens, tok_s)?;
     eprintln!("{}", r.render_text());
     println!("{}", serde_json::to_string(&r).unwrap());
+    enforce(&o, &r);
+    Ok(())
+}
+
+fn show(o: Args) -> Result<(), String> {
+    for p in &o.files {
+        let r: Report = serde_json::from_str(&std::fs::read_to_string(p).map_err(|e| format!("{p}: {e}"))?).map_err(|e| format!("{p}: {e}"))?;
+        println!("{}", r.render_text());
+    }
     Ok(())
 }
 
@@ -204,10 +231,11 @@ fn compare_cmd(o: Args) -> Result<(), String> {
 fn main() {
     let a: Vec<String> = std::env::args().skip(1).collect();
     let r = match a.first().map(String::as_str) {
-        Some(mode @ ("monitor" | "run" | "record" | "compare")) => parse(&a[1..]).and_then(|o| match mode {
+        Some(mode @ ("monitor" | "run" | "record" | "compare" | "show")) => parse(&a[1..]).and_then(|o| match mode {
             "monitor" => monitor(o.interval),
             "run" => run(o),
             "record" => record(o),
+            "show" => show(o),
             _ => compare_cmd(o),
         }),
         _ => Err(USAGE.to_string()),

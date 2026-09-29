@@ -378,6 +378,7 @@ pub struct BatteryReport {
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Report {
     pub label: String,
     pub wall_s: f64,
